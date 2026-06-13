@@ -23,7 +23,7 @@
 ### 安装
 
 ```bash
-go get git@gitee.com:yxcxy/turbolock.git
+go get github.com/ThanksGiveMeCourage/turbolock
 ```
 
 ### 基础用法
@@ -35,7 +35,7 @@ import (
     "context"
     "time"
 
-    "github.com/YOUR_USERNAME/turbolock"
+    "github.com/ThanksGiveMeCourage/turbolock"
     "github.com/redis/go-redis/v9"
 )
 

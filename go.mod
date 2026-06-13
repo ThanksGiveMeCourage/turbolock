@@ -1,4 +1,4 @@
-module turbolock
+module github.com/ThanksGiveMeCourage/turbolock
 
 go 1.25.10
 
