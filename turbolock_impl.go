@@ -37,19 +37,16 @@ const renewLuaScript = `
 
 // 定义本地锁槽，每一个独立的 Key 都会对应一个锁槽
 type localSlot struct {
-	mu     sync.Mutex // 保护当前槽位内状态的局部锁
-	cond   *sync.Cond // 用于挂起和唤醒当前 key 的追随者
-	active bool       // 是否已经有代表（Leader）去远程 Redis 抢锁了
-	//winnerVal string     // 如果 Leader 抢锁成功，把DNA留下来，供本地 Follower 共享释放（如果设计成共享锁模式的话）
-	isSuccess bool      // 【新增】标记 Leader 最终有没有把锁抢成功
-	lastUsed  time.Time // 最后一次被 getSlot 返回的时间
+	mu        sync.Mutex // 保护当前槽位内状态的局部锁
+	cond      *sync.Cond // 用于挂起和唤醒当前 key 的追随者
+	active    bool       // 是否已经有代表（Leader）去远程 Redis 抢锁了
+	isSuccess bool       // 【新增】标记 Leader 最终有没有把锁抢成功
+	lastUsed  time.Time  // 最后一次被 getSlot 返回的时间
 }
 
 type defaultTurboLocker struct {
 	client *redis.Client
 	opts   *Options
-	//globalMu sync.Mutex            // 保护下面这个全局 map 的大锁
-	//slots    map[string]*localSlot // 管理所有不同 key 的本地闸门
 
 	slots sync.Map // key: string -> value: *localSlot
 
@@ -72,22 +69,6 @@ func NewTurboLocker(client *redis.Client, opts ...Option) Turbolocker {
 
 	return t
 }
-
-// 辅助函数：安全地获取或创建一个本地锁槽（废弃）
-/* func (t *defaultTurboLocker) getSlot(key string) *localSlot {
-	t.globalMu.Lock()
-	defer t.globalMu.Unlock()
-
-	slot, exists := t.slots[key]
-	if !exists {
-		slot = &localSlot{
-			active: false, // 明确显式初始化
-		}
-		slot.cond = sync.NewCond(&slot.mu)
-		t.slots[key] = slot
-	}
-	return slot
-} */
 
 func (t *defaultTurboLocker) getSlot(key string) *localSlot {
 	// 快速路径：无锁读取（覆盖 99.99% 的调用）
@@ -183,12 +164,28 @@ func (t *defaultTurboLocker) Lock(ctx context.Context, key string) (UnlockFunc, 
 			// 抢锁成功，挂载自动续期任务到时间轮系统
 			var renewTask *timerTask
 			if t.opts.AutoRenew {
+
+				acquiredAt := time.Now() // 记录单次持锁开始时间点（为的是防止服务崩溃导致锁被无限期持有）
+
 				// TTL/3 是最佳实践——Kafka、etcd、Redisson 等主流分布式锁都默认续期为 TTL/3，没有例外场景需要自定义
 				renewInterval := t.opts.Expiry / 3
-				renewTask = t.wheel.addTask(key, renewInterval, func(ctx context.Context) error {
+				renewTask = taskPool.Get().(*timerTask)
+				renewTask.key = key
+				renewTask.ticks = int(renewInterval / tickMs)
+				renewTask.callback = func(ctx context.Context) error {
+
+					// 每次续期前检查：check 锁是否被持有太久了？
+					if t.opts.MaxHoldDuration > 0 && time.Since(acquiredAt) > t.opts.MaxHoldDuration {
+						renewTask.cancelled = true // 标记停止，下次 fireSlot 会惰性清理
+						return nil                 // 不再续期，让 TTL 自然过期
+					}
+
 					return t.client.Eval(ctx, renewLuaScript,
 						[]string{key}, value, int(t.opts.Expiry.Seconds())).Err()
-				})
+				}
+				renewTask.cancelled = false
+				t.wheel.addTaskDirect(renewTask) // ← 不再 new，直接挂入时间轮
+
 			}
 
 			// 抢锁成功，构建并返回释放锁的闭包
@@ -232,12 +229,16 @@ func (t *defaultTurboLocker) Lock(ctx context.Context, key string) (UnlockFunc, 
 
 // genValue 生成 32 字节的强随机数并转为 base64 字符串
 func (t *defaultTurboLocker) getValue() (string, error) {
-	b := make([]byte, 32)
-	// 使用 crypto/rand（真随机，读取系统熵池）而不是 math/rand（伪随机），确保分布式环境下多台机器生成的 Value 绝对不会碰撞。
+	b := randPool.Get().([]byte)
 	if _, err := rand.Read(b); err != nil {
+		randPool.Put(b) // 出错也要放回
 		return "", err
 	}
-	return base64.StdEncoding.EncodeToString(b), nil
+	// 先编码再放回——EncodeToString 会复制数据到新 string，b 不再被引用
+	// 使用 crypto/rand（真随机，读取系统熵池）而不是 math/rand（伪随机），确保分布式环境下多台机器生成的 Value 绝对不会碰撞。
+	s := base64.StdEncoding.EncodeToString(b)
+	randPool.Put(b)
+	return s, nil
 }
 
 // isIdle 判断 slot 是否处于空闲且长时间未使用状态（调用方需持有 mu）
@@ -269,4 +270,16 @@ func (t *defaultTurboLocker) CleanupSlots(maxAge time.Duration) int {
 func (t *defaultTurboLocker) Close() error {
 	t.wheel.Stop()
 	return nil
+}
+
+// ─── sync.Pool 对象池（阶段四：零内存分配） ───
+
+// randPool 复用 crypto/rand 的 32 字节缓冲区
+var randPool = sync.Pool{
+	New: func() any { return make([]byte, 32) },
+}
+
+// taskPool 复用时间轮任务节点，在 fireSlot 惰性清理时放回
+var taskPool = sync.Pool{
+	New: func() any { return &timerTask{} },
 }

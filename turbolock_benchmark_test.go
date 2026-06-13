@@ -59,3 +59,20 @@ func BenchmarkTurboLock_HighConcurrency(b *testing.B) {
 	})
 
 }
+
+func BenchmarkRandPool(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		buf := randPool.Get().([]byte)
+		randPool.Put(buf)
+	}
+	// 期望: 0 allocs/op
+}
+
+func BenchmarkTaskPool(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		task := taskPool.Get().(*timerTask)
+		task.reset()
+		taskPool.Put(task)
+	}
+	// 期望: 0 allocs/op（warm 后）
+}

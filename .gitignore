@@ -1,0 +1,18 @@
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# 构建产物
+*.exe
+*.test
+
+# 压测临时文件
+phase4_*.txt
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 个人开发进度（不上传）
+doc/turbolock 开发阶段总规划.md

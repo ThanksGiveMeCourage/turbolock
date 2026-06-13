@@ -258,7 +258,13 @@ func (tw *timingWheel) fireSlot(head *timerTask) {
 
 		if task.cancelled {
 			// 已取消：只摘除，不回调，不重新调度
+			//task = next
+
+			// 已取消：放回对象池，不回调，不重新调度
+			task.reset()
+			taskPool.Put(task)
 			task = next
+
 			continue
 		}
 
@@ -327,4 +333,22 @@ func (tw *timingWheel) cascadeLevel2() {
 
 		task = next
 	}
+}
+
+// reset 清空 timerTask 所有字段，为放回 sync.Pool 做准备。
+// 必须将 callback 置 nil，防止闭包引用阻止 GC。
+func (t *timerTask) reset() {
+	t.key = ""
+	t.callback = nil
+	t.ticks = 0
+	t.cancelled = false
+	t.prev = nil
+	t.next = nil
+}
+
+// addTaskDirect 将已构造好的 task 挂入时间轮（不走 new，由调用方从 Pool 获取）。
+func (tw *timingWheel) addTaskDirect(task *timerTask) {
+	tw.mu.Lock()
+	tw.insertTask(task)
+	tw.mu.Unlock()
 }
