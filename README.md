@@ -23,7 +23,7 @@
 ### 安装
 
 ```bash
-go get github.com/YOUR_USERNAME/turbolock
+go get git@gitee.com:yxcxy/turbolock.git
 ```
 
 ### 基础用法
@@ -145,7 +145,7 @@ time.Sleep(20 * time.Second)
 | 文档 | 内容 |
 |------|------|
 | [功能定位](doc/turbolock%20功能定位.md) | 适用场景、与 sync.Mutex / RedSync / etcd 的对比 |
-| [时间轮代码解析](doc/blog/go_层级时间轮看门狗_完整代码解析.md) | 270 行逐行讲解，含面试考点 |
+| [时间轮代码解析](doc/blog/go_层级时间轮看门狗_完整代码解析.md) | 270 行逐行讲解 |
 | [为什么续期是 2.6 秒](doc/blog/go_分布式锁续期_为什么是2.6秒.md) | TTL/3 的数学推导与业界实践 |
 | [第二阶段压测分析](doc/test_doc/第二阶段压测数据分析.md) | 8 项 bug 修复 + 性能数据对比 |
 | [第三阶段任务书](doc/阶段三：时间轮看门狗%20—%20开发任务书.md) | 时间轮设计 & 实现方案 |
