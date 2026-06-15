@@ -1,6 +1,6 @@
 module github.com/ThanksGiveMeCourage/turbolock
 
-go 1.25.10
+go 1.25
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
